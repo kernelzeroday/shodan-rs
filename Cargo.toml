@@ -2,5 +2,26 @@
 name = "shodan-rs"
 version = "0.1.0"
 edition = "2024"
+description = "Shodan CLI rewritten in Rust"
+license = "MIT"
+
+[[bin]]
+name = "shodan"
+path = "src/main.rs"
 
 [dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+colored = "2"
+dirs = "5"
+flate2 = "1"
+indicatif = "0.17"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+mockito = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["full"] }
