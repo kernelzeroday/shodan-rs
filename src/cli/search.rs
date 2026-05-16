@@ -3,7 +3,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 
 use crate::api::ShodanClient;
-use crate::output::{print_banner_fields, humanize_bytes};
+use crate::output::print_banner_fields;
 
 pub async fn run_search(
     client: &ShodanClient,
@@ -13,29 +13,26 @@ pub async fn run_search(
     separator: &str,
     color: bool,
 ) -> Result<()> {
-    let field_list: Vec<&str> = fields.split(',').collect();
-    let mut fetched = 0u32;
-    let mut page = 1u32;
+    if limit > 1000 {
+        anyhow::bail!("Too many results requested, maximum is 1,000");
+    }
+    let field_list: Vec<&str> = fields.split(',').map(|s| s.trim()).collect();
+    if field_list.is_empty() {
+        anyhow::bail!("Please define at least one property to show");
+    }
 
-    while fetched < limit {
-        let page_limit = (limit - fetched).min(100);
-        let result = client
-            .search(query, page, Some(page_limit), None, None, true)
-            .await
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+    // Single API call with limit — mutually exclusive with page param
+    let result = client
+        .search_limit(query, limit, None, Some(fields), false)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        for banner in &result.matches {
-            if fetched >= limit {
-                break;
-            }
-            print_banner_fields(banner, &field_list, separator, color);
-            fetched += 1;
-        }
+    if result.total == 0 {
+        anyhow::bail!("No search results found");
+    }
 
-        if result.matches.is_empty() || fetched >= result.total as u32 {
-            break;
-        }
-        page += 1;
+    for banner in &result.matches {
+        print_banner_fields(banner, &field_list, separator, color);
     }
     Ok(())
 }
@@ -56,8 +53,9 @@ pub async fn run_stats(
     limit: u32,
     output_file: Option<&str>,
 ) -> Result<()> {
+    // Use limit=1 to get total + facets with minimal result payload
     let result = client
-        .search(query, 1, Some(1), Some(facets), None, true)
+        .search_limit(query, 1, Some(facets), None, true)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
@@ -105,14 +103,37 @@ pub async fn run_download(
     use flate2::Compression;
     use indicatif::{ProgressBar, ProgressStyle};
 
+    // Get total count and API info for summary display (matching Python CLI)
+    let total_available = client
+        .count(query, None)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e))?
+        .total;
+
+    let api_info = client
+        .api_info()
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    let total_limit = if limit <= 0 {
+        total_available
+    } else {
+        (limit as u64).min(total_available)
+    };
+
+    eprintln!("Search query:\t\t\t{}", query);
+    eprintln!("Total number of results:\t{}", total_available);
+    eprintln!("Query credits left:\t\t{}", api_info.unlocked_left);
+    eprintln!("Output file:\t\t\t{}", filename);
+
     let file = OpenOptions::new()
         .create(true)
-        .append(true)
+        .write(true)
+        .truncate(true)
         .open(filename)?;
     let mut gz = GzEncoder::new(file, Compression::new(9));
 
-    let total_limit = if limit < 0 { u64::MAX } else { limit as u64 };
-    let bar = ProgressBar::new(total_limit.min(1_000_000));
+    let bar = ProgressBar::new(total_limit);
     bar.set_style(
         ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {bar:40} {pos}/{len} ({percent}%)")?
@@ -122,17 +143,12 @@ pub async fn run_download(
     let mut fetched = 0u64;
     let mut page = 1u32;
 
+    // Page-based cursor — no limit param per call, 100 results per page
     loop {
-        let page_size = (total_limit - fetched).min(100) as u32;
         let result = client
-            .search(query, page, Some(page_size), None, fields, false)
+            .search_page(query, page, None, fields, false)
             .await
             .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-        if page == 1 {
-            let real_total = result.total.min(total_limit);
-            bar.set_length(real_total);
-        }
 
         for banner in &result.matches {
             if fetched >= total_limit {
@@ -144,20 +160,19 @@ pub async fn run_download(
             bar.inc(1);
         }
 
-        if result.matches.is_empty() || fetched >= total_limit || fetched >= result.total {
+        if result.matches.is_empty() || fetched >= total_limit {
             break;
         }
         page += 1;
     }
 
     gz.finish()?;
-    bar.finish();
-    eprintln!(
-        "Saved {} results into '{}'\n  Size: {}",
-        fetched,
-        filename,
-        humanize_bytes(std::fs::metadata(filename)?.len()),
-    );
+    bar.finish_and_clear();
+
+    if fetched < total_limit {
+        eprintln!("Notice: fewer results were saved than requested");
+    }
+    eprintln!("Saved {} results into file {}", fetched, filename);
     Ok(())
 }
 

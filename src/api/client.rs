@@ -125,34 +125,48 @@ impl ShodanClient {
         serde_json::from_value(val).map_err(ShodanError::Json)
     }
 
-    pub async fn search(
+    /// Search with a page number (no limit param sent — they are mutually exclusive).
+    pub async fn search_page(
         &self,
         query: &str,
         page: u32,
-        limit: Option<u32>,
         facets: Option<&str>,
         fields: Option<&str>,
         minify: bool,
     ) -> Result<SearchResult> {
         let page_s = page.to_string();
         let minify_s = minify.to_string();
-        let mut params: Vec<(&str, &str)> = vec![
-            ("query", query),
-            ("page", &page_s),
-            ("minify", &minify_s),
-        ];
-        let limit_s;
-        if let Some(l) = limit {
-            limit_s = l.to_string();
-            params.push(("limit", &limit_s));
-        }
+        let mut params: Vec<(&str, &str)> =
+            vec![("query", query), ("page", &page_s), ("minify", &minify_s)];
         if let Some(f) = facets {
             params.push(("facets", f));
         }
         if let Some(f) = fields {
             params.push(("fields", f));
         }
+        let val = self.get("/shodan/host/search", &params).await?;
+        serde_json::from_value(val).map_err(ShodanError::Json)
+    }
 
+    /// Search with an explicit limit (no page param sent — they are mutually exclusive).
+    pub async fn search_limit(
+        &self,
+        query: &str,
+        limit: u32,
+        facets: Option<&str>,
+        fields: Option<&str>,
+        minify: bool,
+    ) -> Result<SearchResult> {
+        let limit_s = limit.to_string();
+        let minify_s = minify.to_string();
+        let mut params: Vec<(&str, &str)> =
+            vec![("query", query), ("limit", &limit_s), ("minify", &minify_s)];
+        if let Some(f) = facets {
+            params.push(("facets", f));
+        }
+        if let Some(f) = fields {
+            params.push(("fields", f));
+        }
         let val = self.get("/shodan/host/search", &params).await?;
         serde_json::from_value(val).map_err(ShodanError::Json)
     }
