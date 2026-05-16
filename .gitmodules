@@ -1,0 +1,3 @@
+[submodule "shodan-python"]
+	path = shodan-python
+	url = https://github.com/kernelzeroday/shodan-python
