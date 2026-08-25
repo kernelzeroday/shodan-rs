@@ -202,14 +202,6 @@ impl ShodanClient {
             .ok_or_else(|| ShodanError::Api("Unexpected response format".to_string()))
     }
 
-    pub async fn honeyscore(&self, ip: &str) -> Result<f64> {
-        let val = self
-            .get(&format!("/labs/honeyscore/{}", ip), &[])
-            .await?;
-        val.as_f64()
-            .ok_or_else(|| ShodanError::Api("Unexpected response format".to_string()))
-    }
-
     pub async fn dns_domain(
         &self,
         domain: &str,
@@ -427,20 +419,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_honeyscore() {
+    async fn test_host_info_tags() {
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("GET", "/labs/honeyscore/1.2.3.4")
-            .match_query(mockito::Matcher::UrlEncoded("key".into(), "testkey".into()))
+            .mock("GET", "/shodan/host/1.2.3.4")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("key".into(), "testkey".into()),
+                mockito::Matcher::UrlEncoded("minify".into(), "true".into()),
+            ]))
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body("0.75")
+            .with_body(r#"{"ip_str":"1.2.3.4","tags":["honeypot"]}"#)
             .create_async()
             .await;
 
         let client = make_client(&server.url());
-        let score = client.honeyscore("1.2.3.4").await.unwrap();
-        assert_eq!(score, 0.75);
+        let host = client.host_info("1.2.3.4", false, true).await.unwrap();
+        assert_eq!(host.tags, Some(vec!["honeypot".to_string()]));
         mock.assert_async().await;
     }
 }

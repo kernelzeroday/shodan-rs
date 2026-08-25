@@ -112,8 +112,7 @@ enum Command {
         #[arg(short = 'T', long, help = "Only return records of this type")]
         r#type: Option<String>,
     },
-
-    /// Check if an IP is a honeypot
+    /// Check whether Shodan tagged an IP as a honeypot
     Honeyscore {
         #[arg(help = "IP address to check")]
         ip: String,
@@ -330,18 +329,21 @@ async fn run() -> Result<()> {
         Command::Honeyscore { ip } => {
             let key = config::load_api_key()?;
             let client = ShodanClient::new(&key);
-            let score = client
-                .honeyscore(&ip)
+            let host = client
+                .host_info(&ip, false, true)
                 .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
-            if score == 1.0 {
-                println!("{}", "Honeypot detected".red());
-            } else if score > 0.5 {
-                println!("{}", "Probably a honeypot".yellow());
+            let is_honeypot = host
+                .tags
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .any(|tag| tag == "honeypot");
+            if is_honeypot {
+                println!("{}", "Honeypot tag detected".red());
             } else {
-                println!("{}", "Not a honeypot".green());
+                println!("{}", "No honeypot tag found".green());
             }
-            println!("Score: {}", score);
         }
 
         Command::Version => {

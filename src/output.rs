@@ -16,6 +16,11 @@ pub fn print_host(host: &HostInfo, history: bool) {
             println!("{:25}{}", "Hostnames:", names.join(";"));
         }
     }
+    if let Some(tags) = &host.tags {
+        if !tags.is_empty() {
+            println!("{:25}{}", "Tags:", tags.join(";"));
+        }
+    }
     if let Some(city) = &host.city {
         println!("{:25}{}", "City:", city);
     }

@@ -16,6 +16,7 @@ pub struct HostInfo {
     pub last_update: Option<String>,
     pub ports: Option<Vec<u16>>,
     pub vulns: Option<Vec<String>>,
+    pub tags: Option<Vec<String>>,
     pub data: Option<Vec<Banner>>,
     pub asn: Option<String>,
     pub region_code: Option<String>,
