@@ -46,7 +46,8 @@ enum Command {
         #[arg(long, default_value = "ip_str,port,hostnames,data",
               help = "Comma-separated list of fields to display")]
         fields: String,
-        #[arg(long, default_value = "100", help = "Number of results to return (max 1000)")]
+        #[arg(long, default_value = "100",
+              help = "Number of results to return (0 for all, max 1000 otherwise)")]
         limit: u32,
         #[arg(long, default_value = "\t", help = "Field separator")]
         separator: String,

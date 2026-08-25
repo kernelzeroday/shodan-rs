@@ -21,18 +21,45 @@ pub async fn run_search(
         anyhow::bail!("Please define at least one property to show");
     }
 
-    // Single API call with limit — mutually exclusive with page param
-    let result = client
-        .search_limit(query, limit, None, Some(fields), false)
-        .await
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let result = if limit == 0 {
+        client
+            .search_page(query, 1, None, Some(fields), false)
+            .await
+    } else {
+        client
+            .search_limit(query, limit, None, Some(fields), false)
+            .await
+    }
+    .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     if result.total == 0 {
         anyhow::bail!("No search results found");
     }
 
+    let total = result.total;
+    let mut fetched = result.matches.len() as u64;
     for banner in &result.matches {
         print_banner_fields(banner, &field_list, separator, color);
+    }
+
+    if limit == 0 {
+        let mut page = 2u32;
+        while fetched < total {
+            let result = client
+                .search_page(query, page, None, Some(fields), false)
+                .await
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            if result.matches.is_empty() {
+                break;
+            }
+            fetched += result.matches.len() as u64;
+            for banner in &result.matches {
+                print_banner_fields(banner, &field_list, separator, color);
+            }
+            page = page
+                .checked_add(1)
+                .ok_or_else(|| anyhow::anyhow!("Search result page overflow"))?;
+        }
     }
     Ok(())
 }
@@ -311,6 +338,44 @@ fn matches_net(banner: &serde_json::Value, cidr: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mockito::{Matcher, Server};
+
+    #[tokio::test]
+    async fn zero_limit_fetches_every_search_page() {
+        let mut server = Server::new_async().await;
+        let first_page = server
+            .mock("GET", "/shodan/host/search")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("key".into(), "testkey".into()),
+                Matcher::UrlEncoded("query".into(), "apache".into()),
+                Matcher::UrlEncoded("page".into(), "1".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"matches":[{"ip_str":"192.0.2.1"}],"total":2}"#)
+            .create_async()
+            .await;
+        let second_page = server
+            .mock("GET", "/shodan/host/search")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("key".into(), "testkey".into()),
+                Matcher::UrlEncoded("query".into(), "apache".into()),
+                Matcher::UrlEncoded("page".into(), "2".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"matches":[{"ip_str":"192.0.2.2"}],"total":2}"#)
+            .create_async()
+            .await;
+        let client = ShodanClient::with_base_url("testkey", server.url());
+
+        run_search(&client, "apache", "ip_str", 0, "\t", false)
+            .await
+            .unwrap();
+
+        first_page.assert_async().await;
+        second_page.assert_async().await;
+    }
 
     #[test]
     fn test_matches_net_cidr() {

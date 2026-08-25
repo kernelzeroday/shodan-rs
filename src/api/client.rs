@@ -23,6 +23,15 @@ impl ShodanClient {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_base_url(key: impl Into<String>, base_url: impl Into<String>) -> Self {
+        ShodanClient {
+            key: key.into(),
+            client: Client::new(),
+            base_url: base_url.into(),
+        }
+    }
+
     async fn get(&self, path: &str, params: &[(&str, &str)]) -> Result<Value> {
         let url = format!("{}{}", self.base_url, path);
         let mut all_params: Vec<(&str, &str)> = vec![("key", &self.key)];
