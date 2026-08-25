@@ -425,4 +425,22 @@ mod tests {
         let ip = client.myip().await.unwrap();
         assert_eq!(ip, "1.2.3.4");
     }
+
+    #[tokio::test]
+    async fn test_honeyscore() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/labs/honeyscore/1.2.3.4")
+            .match_query(mockito::Matcher::UrlEncoded("key".into(), "testkey".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("0.75")
+            .create_async()
+            .await;
+
+        let client = make_client(&server.url());
+        let score = client.honeyscore("1.2.3.4").await.unwrap();
+        assert_eq!(score, 0.75);
+        mock.assert_async().await;
+    }
 }

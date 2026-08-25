@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 
 mod api;
 mod cli;
@@ -333,7 +334,14 @@ async fn run() -> Result<()> {
                 .honeyscore(&ip)
                 .await
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
-            println!("Honeypot probability: {:.1}%", score * 100.0);
+            if score == 1.0 {
+                println!("{}", "Honeypot detected".red());
+            } else if score > 0.5 {
+                println!("{}", "Probably a honeypot".yellow());
+            } else {
+                println!("{}", "Not a honeypot".green());
+            }
+            println!("Score: {}", score);
         }
 
         Command::Version => {
