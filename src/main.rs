@@ -10,7 +10,7 @@ mod output;
 use api::ShodanClient;
 
 #[derive(Parser)]
-#[command(name = "shodan", version, about = "The official command-line client for Shodan")]
+#[command(name = "shodan-rs", version, about = "The official command-line client for Shodan")]
 struct Cli {
     #[command(subcommand)]
     command: Command,

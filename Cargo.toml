@@ -6,7 +6,7 @@ description = "Shodan CLI rewritten in Rust"
 license = "MIT"
 
 [[bin]]
-name = "shodan"
+name = "shodan-rs"
 path = "src/main.rs"
 
 [dependencies]

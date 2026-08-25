@@ -30,7 +30,7 @@ fn load_api_key_from(dir: &Path) -> Result<String> {
     let path = dir.join("api_key");
     if !path.exists() {
         anyhow::bail!(
-            r#"Please run "shodan init <api key>" before using this command"#
+            r#"Please run "shodan-rs init <api key>" before using this command"#
         );
     }
     let meta = fs::metadata(&path)?;
@@ -69,7 +69,7 @@ mod tests {
         let dir = config_dir_from(tmp.path());
         let result = load_api_key_from(&dir);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("shodan init"));
+        assert!(result.unwrap_err().to_string().contains("shodan-rs init"));
     }
 
     #[test]
