@@ -16,6 +16,10 @@ use api::ShodanClient;
     about = "The official command-line client for Shodan"
 )]
 struct Cli {
+    /// API key to use instead of the configured key; repeat or comma-separate to rotate keys
+    #[arg(long = "key", global = true, value_name = "KEY", value_delimiter = ',')]
+    keys: Vec<String>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -253,10 +257,18 @@ async fn main() {
     }
 }
 
-async fn run() -> Result<()> {
-    let cli = Cli::parse();
+fn client_from_keys(keys: Vec<String>) -> Result<ShodanClient> {
+    if keys.is_empty() {
+        Ok(ShodanClient::new(config::load_api_key()?))
+    } else {
+        Ok(ShodanClient::with_keys(keys))
+    }
+}
 
-    match cli.command {
+async fn run() -> Result<()> {
+    let Cli { keys, command } = Cli::parse();
+
+    match command {
         Command::Init { key } => {
             config::save_api_key(&key)?;
             let client = ShodanClient::new(&key);
@@ -271,8 +283,7 @@ async fn run() -> Result<()> {
         }
 
         Command::Info => {
-            let key = config::load_api_key()?;
-            let client = ShodanClient::new(&key);
+            let client = client_from_keys(keys)?;
             let info = client
                 .api_info()
                 .await
@@ -289,8 +300,7 @@ async fn run() -> Result<()> {
         }
 
         Command::Myip => {
-            let key = config::load_api_key()?;
-            let client = ShodanClient::new(&key);
+            let client = client_from_keys(keys)?;
             let ip = client.myip().await.map_err(|e| anyhow::anyhow!("{}", e))?;
             println!("{}", ip);
         }
@@ -300,8 +310,7 @@ async fn run() -> Result<()> {
             history,
             minify,
         } => {
-            let key = config::load_api_key()?;
-            let client = ShodanClient::new(&key);
+            let client = client_from_keys(keys)?;
             cli::host::run(&client, &ip, history, minify).await?;
         }
 
@@ -312,15 +321,13 @@ async fn run() -> Result<()> {
             separator,
             no_color,
         } => {
-            let key = config::load_api_key()?;
-            let client = ShodanClient::new(&key);
+            let client = client_from_keys(keys)?;
             let q = query.join(" ");
             cli::search::run_search(&client, &q, &fields, limit, &separator, !no_color).await?;
         }
 
         Command::Count { query } => {
-            let key = config::load_api_key()?;
-            let client = ShodanClient::new(&key);
+            let client = client_from_keys(keys)?;
             let q = query.join(" ");
             cli::search::run_count(&client, &q, None).await?;
         }
@@ -331,8 +338,7 @@ async fn run() -> Result<()> {
             limit,
             filename,
         } => {
-            let key = config::load_api_key()?;
-            let client = ShodanClient::new(&key);
+            let client = client_from_keys(keys)?;
             let q = query.join(" ");
             cli::search::run_stats(&client, &q, &facets, limit, filename.as_deref()).await?;
         }
@@ -343,8 +349,7 @@ async fn run() -> Result<()> {
             limit,
             fields,
         } => {
-            let key = config::load_api_key()?;
-            let client = ShodanClient::new(&key);
+            let client = client_from_keys(keys)?;
             let q = query.join(" ");
             let fname = if filename.ends_with(".json.gz") {
                 filename
@@ -377,8 +382,7 @@ async fn run() -> Result<()> {
             history,
             r#type,
         } => {
-            let key = config::load_api_key()?;
-            let client = ShodanClient::new(&key);
+            let client = client_from_keys(keys)?;
             let result = client
                 .dns_domain(&domain, history, r#type.as_deref(), 1)
                 .await
@@ -406,8 +410,7 @@ async fn run() -> Result<()> {
         }
 
         Command::Honeyscore { ip } => {
-            let key = config::load_api_key()?;
-            let client = ShodanClient::new(&key);
+            let client = client_from_keys(keys)?;
             let host = client
                 .host_info(&ip, false, true)
                 .await
@@ -430,8 +433,7 @@ async fn run() -> Result<()> {
         }
 
         Command::Alert { subcommand } => {
-            let key = config::load_api_key()?;
-            let client = ShodanClient::new(&key);
+            let client = client_from_keys(keys)?;
             match subcommand {
                 AlertCommand::List => cli::alert::run_list(&client).await?,
                 AlertCommand::Info { id } => cli::alert::run_info(&client, &id).await?,
@@ -454,8 +456,7 @@ async fn run() -> Result<()> {
         }
 
         Command::Data { subcommand } => {
-            let key = config::load_api_key()?;
-            let client = ShodanClient::new(&key);
+            let client = client_from_keys(keys)?;
             match subcommand {
                 DataCommand::List => cli::data::run_list(&client).await?,
                 DataCommand::Files { dataset } => cli::data::run_files(&client, &dataset).await?,
@@ -463,8 +464,7 @@ async fn run() -> Result<()> {
         }
 
         Command::Scan { subcommand } => {
-            let key = config::load_api_key()?;
-            let client = ShodanClient::new(&key);
+            let client = client_from_keys(keys)?;
             match subcommand {
                 ScanCommand::Submit { ips } => cli::scan::run_submit(&client, &ips).await?,
                 ScanCommand::Status { id } => cli::scan::run_status(&client, &id).await?,
@@ -478,6 +478,28 @@ async fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_one_explicit_api_key() {
+        let cli = Cli::try_parse_from(["shodan-rs", "info", "--key", "specific"]).unwrap();
+
+        assert_eq!(cli.keys, ["specific"]);
+    }
+
+    #[test]
+    fn parses_repeated_and_comma_separated_api_keys() {
+        let cli = Cli::try_parse_from([
+            "shodan-rs",
+            "info",
+            "--key",
+            "first,second",
+            "--key",
+            "third",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.keys, ["first", "second", "third"]);
+    }
 
     #[test]
     fn monitor_alias_parses_multiple_networks() {

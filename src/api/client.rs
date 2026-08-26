@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use reqwest::Client;
 use serde_json::Value;
 
@@ -7,16 +9,35 @@ use super::types::*;
 const BASE_URL: &str = "https://api.shodan.io";
 
 pub struct ShodanClient {
-    key: String,
+    keys: Vec<String>,
+    next_key: AtomicUsize,
     client: Client,
     base_url: String,
 }
 
 impl ShodanClient {
+    /// Creates a client that uses one API key for every request.
     pub fn new(key: impl Into<String>) -> Self {
+        Self::with_keys([key])
+    }
+
+    /// Creates a client that rotates through the supplied API keys per request.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `keys` is empty.
+    pub fn with_keys<I, K>(keys: I) -> Self
+    where
+        I: IntoIterator<Item = K>,
+        K: Into<String>,
+    {
+        let keys = keys.into_iter().map(Into::into).collect::<Vec<_>>();
+        assert!(!keys.is_empty(), "at least one Shodan API key is required");
+
         let base_url = std::env::var("SHODAN_API_URL").unwrap_or_else(|_| BASE_URL.to_string());
         ShodanClient {
-            key: key.into(),
+            keys,
+            next_key: AtomicUsize::new(0),
             client: Client::new(),
             base_url,
         }
@@ -24,16 +45,29 @@ impl ShodanClient {
 
     #[cfg(test)]
     pub(crate) fn with_base_url(key: impl Into<String>, base_url: impl Into<String>) -> Self {
-        ShodanClient {
-            key: key.into(),
-            client: Client::new(),
-            base_url: base_url.into(),
-        }
+        Self::with_keys_and_base_url([key], base_url)
+    }
+
+    #[cfg(test)]
+    fn with_keys_and_base_url<I, K>(keys: I, base_url: impl Into<String>) -> Self
+    where
+        I: IntoIterator<Item = K>,
+        K: Into<String>,
+    {
+        let mut client = Self::with_keys(keys);
+        client.base_url = base_url.into();
+        client
+    }
+
+    fn next_key(&self) -> &str {
+        let index = self.next_key.fetch_add(1, Ordering::Relaxed) % self.keys.len();
+        &self.keys[index]
     }
 
     async fn get(&self, path: &str, params: &[(&str, &str)]) -> Result<Value> {
         let url = format!("{}{}", self.base_url, path);
-        let mut all_params: Vec<(&str, &str)> = vec![("key", &self.key)];
+        let key = self.next_key();
+        let mut all_params: Vec<(&str, &str)> = vec![("key", key)];
         all_params.extend_from_slice(params);
 
         let resp = self.client.get(&url).query(&all_params).send().await?;
@@ -43,7 +77,8 @@ impl ShodanClient {
 
     async fn post_json(&self, path: &str, params: &[(&str, &str)], body: &Value) -> Result<Value> {
         let url = format!("{}{}", self.base_url, path);
-        let mut all_params: Vec<(&str, &str)> = vec![("key", &self.key)];
+        let key = self.next_key();
+        let mut all_params: Vec<(&str, &str)> = vec![("key", key)];
         all_params.extend_from_slice(params);
 
         let resp = self
@@ -59,7 +94,8 @@ impl ShodanClient {
 
     async fn delete(&self, path: &str, params: &[(&str, &str)]) -> Result<Value> {
         let url = format!("{}{}", self.base_url, path);
-        let mut all_params: Vec<(&str, &str)> = vec![("key", &self.key)];
+        let key = self.next_key();
+        let mut all_params: Vec<(&str, &str)> = vec![("key", key)];
         all_params.extend_from_slice(params);
 
         let resp = self.client.delete(&url).query(&all_params).send().await?;
@@ -69,7 +105,8 @@ impl ShodanClient {
 
     async fn put(&self, path: &str, params: &[(&str, &str)]) -> Result<Value> {
         let url = format!("{}{}", self.base_url, path);
-        let mut all_params: Vec<(&str, &str)> = vec![("key", &self.key)];
+        let key = self.next_key();
+        let mut all_params: Vec<(&str, &str)> = vec![("key", key)];
         all_params.extend_from_slice(params);
 
         let resp = self.client.put(&url).query(&all_params).send().await?;
@@ -298,11 +335,39 @@ mod tests {
     use mockito::Server;
 
     fn make_client(base_url: &str) -> ShodanClient {
-        ShodanClient {
-            key: "testkey".to_string(),
-            client: Client::new(),
-            base_url: base_url.to_string(),
-        }
+        ShodanClient::with_base_url("testkey", base_url)
+    }
+
+    #[tokio::test]
+    async fn rotates_api_keys_for_successive_requests() {
+        let mut server = Server::new_async().await;
+        let response = r#"{"scan_credits":0,"usage_limits":{"scan_credits":0,"query_credits":0,"monitored_ips":0},"plan":"dev","unlocked":true,"query_credits":100,"monitored_ips":0,"unlocked_left":0,"telnet":false,"https":true}"#;
+        let first_key = server
+            .mock("GET", "/api-info")
+            .match_query(mockito::Matcher::UrlEncoded("key".into(), "first".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(response)
+            .expect(2)
+            .create_async()
+            .await;
+        let second_key = server
+            .mock("GET", "/api-info")
+            .match_query(mockito::Matcher::UrlEncoded("key".into(), "second".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(response)
+            .expect(1)
+            .create_async()
+            .await;
+        let client = ShodanClient::with_keys_and_base_url(["first", "second"], server.url());
+
+        client.api_info().await.unwrap();
+        client.api_info().await.unwrap();
+        client.api_info().await.unwrap();
+
+        first_key.assert_async().await;
+        second_key.assert_async().await;
     }
 
     #[tokio::test]
