@@ -10,7 +10,11 @@ mod output;
 use api::ShodanClient;
 
 #[derive(Parser)]
-#[command(name = "shodan-rs", version, about = "The official command-line client for Shodan")]
+#[command(
+    name = "shodan-rs",
+    version,
+    about = "The official command-line client for Shodan"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -44,15 +48,25 @@ enum Command {
     Search {
         #[arg(help = "Search query", num_args = 1..)]
         query: Vec<String>,
-        #[arg(long, default_value = "ip_str,port,hostnames,data",
-              help = "Comma-separated list of fields to display")]
+        #[arg(
+            long,
+            default_value = "ip_str,port,hostnames,data",
+            help = "Comma-separated list of fields to display"
+        )]
         fields: String,
-        #[arg(long, default_value = "100",
-              help = "Number of results to return (0 for all, max 1000 otherwise)")]
+        #[arg(
+            long,
+            default_value = "100",
+            help = "Number of results to return (0 for all, max 1000 otherwise)"
+        )]
         limit: u32,
         #[arg(long, default_value = "\t", help = "Field separator")]
         separator: String,
-        #[arg(long = "no-color", default_value = "false", help = "Disable colored output")]
+        #[arg(
+            long = "no-color",
+            default_value = "false",
+            help = "Disable colored output"
+        )]
         no_color: bool,
     },
 
@@ -66,9 +80,17 @@ enum Command {
     Stats {
         #[arg(help = "Search query", num_args = 1..)]
         query: Vec<String>,
-        #[arg(long, default_value = "country,org", help = "Comma-separated list of facets")]
+        #[arg(
+            long,
+            default_value = "country,org",
+            help = "Comma-separated list of facets"
+        )]
         facets: String,
-        #[arg(long, default_value = "10", help = "Number of top values to show per facet")]
+        #[arg(
+            long,
+            default_value = "10",
+            help = "Number of top values to show per facet"
+        )]
         limit: u32,
         #[arg(short = 'O', long, help = "Save results to a CSV file")]
         filename: Option<String>,
@@ -80,8 +102,11 @@ enum Command {
         filename: String,
         #[arg(help = "Search query", num_args = 1..)]
         query: Vec<String>,
-        #[arg(long, default_value = "1000",
-              help = "Number of results to download (-1 for all)")]
+        #[arg(
+            long,
+            default_value = "1000",
+            help = "Number of results to download (-1 for all)"
+        )]
         limit: i64,
         #[arg(long, help = "Comma-separated list of fields to download")]
         fields: Option<String>,
@@ -121,7 +146,8 @@ enum Command {
     /// Print the version
     Version,
 
-    /// Manage network alerts
+    /// Manage monitored networks and alert triggers
+    #[command(alias = "monitor")]
     Alert {
         #[command(subcommand)]
         subcommand: AlertCommand,
@@ -142,22 +168,40 @@ enum Command {
 
 #[derive(Subcommand)]
 enum AlertCommand {
-    /// List all active alerts
+    /// List all network alerts
     List,
-    /// Create a new alert for an IP or network range
+    /// Show a network alert
+    Info {
+        #[arg(help = "Alert ID")]
+        id: String,
+    },
+    /// Create a network alert for one or more IPs or network ranges
     Create {
         #[arg(help = "Name of the alert")]
         name: String,
-        #[arg(help = "IP address or CIDR range to monitor")]
-        ip: String,
-        #[arg(long, default_value = "0", help = "Seconds until the alert expires (0 = never)")]
+        #[arg(help = "IP addresses or CIDR ranges to monitor", num_args = 1..)]
+        ips: Vec<String>,
+        #[arg(
+            long,
+            default_value = "0",
+            help = "Seconds until the alert expires (0 = never)"
+        )]
         expires: i64,
+    },
+    /// Replace the IPs and network ranges monitored by an alert
+    Update {
+        #[arg(help = "Alert ID")]
+        id: String,
+        #[arg(help = "IP addresses or CIDR ranges to monitor", num_args = 1..)]
+        ips: Vec<String>,
     },
     /// Delete an alert
     Delete {
         #[arg(help = "Alert ID")]
         id: String,
     },
+    /// Delete all alerts
+    Clear,
     /// List available alert triggers
     Triggers,
     /// Enable a trigger on an alert
@@ -247,20 +291,27 @@ async fn run() -> Result<()> {
         Command::Myip => {
             let key = config::load_api_key()?;
             let client = ShodanClient::new(&key);
-            let ip = client
-                .myip()
-                .await
-                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let ip = client.myip().await.map_err(|e| anyhow::anyhow!("{}", e))?;
             println!("{}", ip);
         }
 
-        Command::Host { ip, history, minify } => {
+        Command::Host {
+            ip,
+            history,
+            minify,
+        } => {
             let key = config::load_api_key()?;
             let client = ShodanClient::new(&key);
             cli::host::run(&client, &ip, history, minify).await?;
         }
 
-        Command::Search { query, fields, limit, separator, no_color } => {
+        Command::Search {
+            query,
+            fields,
+            limit,
+            separator,
+            no_color,
+        } => {
             let key = config::load_api_key()?;
             let client = ShodanClient::new(&key);
             let q = query.join(" ");
@@ -274,14 +325,24 @@ async fn run() -> Result<()> {
             cli::search::run_count(&client, &q, None).await?;
         }
 
-        Command::Stats { query, facets, limit, filename } => {
+        Command::Stats {
+            query,
+            facets,
+            limit,
+            filename,
+        } => {
             let key = config::load_api_key()?;
             let client = ShodanClient::new(&key);
             let q = query.join(" ");
             cli::search::run_stats(&client, &q, &facets, limit, filename.as_deref()).await?;
         }
 
-        Command::Download { filename, query, limit, fields } => {
+        Command::Download {
+            filename,
+            query,
+            limit,
+            fields,
+        } => {
             let key = config::load_api_key()?;
             let client = ShodanClient::new(&key);
             let q = query.join(" ");
@@ -293,11 +354,29 @@ async fn run() -> Result<()> {
             cli::search::run_download(&client, &q, &fname, limit, fields.as_deref()).await?;
         }
 
-        Command::Parse { filenames, fields, filters, filename, separator, no_color } => {
-            cli::search::run_parse(&filenames, &fields, &filters, filename.as_deref(), &separator, !no_color)?;
+        Command::Parse {
+            filenames,
+            fields,
+            filters,
+            filename,
+            separator,
+            no_color,
+        } => {
+            cli::search::run_parse(
+                &filenames,
+                &fields,
+                &filters,
+                filename.as_deref(),
+                &separator,
+                !no_color,
+            )?;
         }
 
-        Command::Domain { domain, history, r#type } => {
+        Command::Domain {
+            domain,
+            history,
+            r#type,
+        } => {
             let key = config::load_api_key()?;
             let client = ShodanClient::new(&key);
             let result = client
@@ -355,10 +434,15 @@ async fn run() -> Result<()> {
             let client = ShodanClient::new(&key);
             match subcommand {
                 AlertCommand::List => cli::alert::run_list(&client).await?,
-                AlertCommand::Create { name, ip, expires } => {
-                    cli::alert::run_create(&client, &name, &ip, expires).await?
+                AlertCommand::Info { id } => cli::alert::run_info(&client, &id).await?,
+                AlertCommand::Create { name, ips, expires } => {
+                    cli::alert::run_create(&client, &name, &ips, expires).await?
+                }
+                AlertCommand::Update { id, ips } => {
+                    cli::alert::run_update(&client, &id, &ips).await?
                 }
                 AlertCommand::Delete { id } => cli::alert::run_delete(&client, &id).await?,
+                AlertCommand::Clear => cli::alert::run_clear(&client).await?,
                 AlertCommand::Triggers => cli::alert::run_triggers(&client).await?,
                 AlertCommand::Enable { id, trigger } => {
                     cli::alert::run_enable_trigger(&client, &id, &trigger).await?
@@ -374,9 +458,7 @@ async fn run() -> Result<()> {
             let client = ShodanClient::new(&key);
             match subcommand {
                 DataCommand::List => cli::data::run_list(&client).await?,
-                DataCommand::Files { dataset } => {
-                    cli::data::run_files(&client, &dataset).await?
-                }
+                DataCommand::Files { dataset } => cli::data::run_files(&client, &dataset).await?,
             }
         }
 
@@ -391,4 +473,46 @@ async fn run() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monitor_alias_parses_multiple_networks() {
+        let cli = Cli::try_parse_from([
+            "shodan-rs",
+            "monitor",
+            "create",
+            "production",
+            "1.2.3.4",
+            "10.0.0.0/24",
+            "--expires",
+            "60",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Command::Alert {
+                subcommand: AlertCommand::Create { name, ips, expires },
+            } => {
+                assert_eq!(name, "production");
+                assert_eq!(ips, ["1.2.3.4", "10.0.0.0/24"]);
+                assert_eq!(expires, 60);
+            }
+            _ => panic!("expected alert create command"),
+        }
+    }
+
+    #[test]
+    fn alert_clear_parses() {
+        let cli = Cli::try_parse_from(["shodan-rs", "alert", "clear"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Alert {
+                subcommand: AlertCommand::Clear
+            }
+        ));
+    }
 }

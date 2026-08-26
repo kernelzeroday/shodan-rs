@@ -14,8 +14,7 @@ pub struct ShodanClient {
 
 impl ShodanClient {
     pub fn new(key: impl Into<String>) -> Self {
-        let base_url = std::env::var("SHODAN_API_URL")
-            .unwrap_or_else(|_| BASE_URL.to_string());
+        let base_url = std::env::var("SHODAN_API_URL").unwrap_or_else(|_| BASE_URL.to_string());
         ShodanClient {
             key: key.into(),
             client: Client::new(),
@@ -37,12 +36,7 @@ impl ShodanClient {
         let mut all_params: Vec<(&str, &str)> = vec![("key", &self.key)];
         all_params.extend_from_slice(params);
 
-        let resp = self
-            .client
-            .get(&url)
-            .query(&all_params)
-            .send()
-            .await?;
+        let resp = self.client.get(&url).query(&all_params).send().await?;
 
         self.parse_response(resp).await
     }
@@ -68,12 +62,7 @@ impl ShodanClient {
         let mut all_params: Vec<(&str, &str)> = vec![("key", &self.key)];
         all_params.extend_from_slice(params);
 
-        let resp = self
-            .client
-            .delete(&url)
-            .query(&all_params)
-            .send()
-            .await?;
+        let resp = self.client.delete(&url).query(&all_params).send().await?;
 
         self.parse_response(resp).await
     }
@@ -83,12 +72,7 @@ impl ShodanClient {
         let mut all_params: Vec<(&str, &str)> = vec![("key", &self.key)];
         all_params.extend_from_slice(params);
 
-        let resp = self
-            .client
-            .put(&url)
-            .query(&all_params)
-            .send()
-            .await?;
+        let resp = self.client.put(&url).query(&all_params).send().await?;
 
         self.parse_response(resp).await
     }
@@ -100,7 +84,9 @@ impl ShodanClient {
             return Err(ShodanError::Api("Invalid API key".to_string()));
         }
         if status == 403 {
-            return Err(ShodanError::Api("Access denied (403 Forbidden)".to_string()));
+            return Err(ShodanError::Api(
+                "Access denied (403 Forbidden)".to_string(),
+            ));
         }
         if status == 502 {
             return Err(ShodanError::Api("Bad Gateway (502)".to_string()));
@@ -128,9 +114,7 @@ impl ShodanClient {
             params.push(("minify", &minify_s));
         }
 
-        let val = self
-            .get(&format!("/shodan/host/{}", ip), &params)
-            .await?;
+        let val = self.get(&format!("/shodan/host/{}", ip), &params).await?;
         serde_json::from_value(val).map_err(ShodanError::Json)
     }
 
@@ -235,9 +219,7 @@ impl ShodanClient {
     }
 
     pub async fn scan_status(&self, scan_id: &str) -> Result<ScanStatus> {
-        let val = self
-            .get(&format!("/shodan/scan/{}", scan_id), &[])
-            .await?;
+        let val = self.get(&format!("/shodan/scan/{}", scan_id), &[]).await?;
         serde_json::from_value(val).map_err(ShodanError::Json)
     }
 
@@ -253,18 +235,23 @@ impl ShodanClient {
         serde_json::from_value(val).map_err(ShodanError::Json)
     }
 
-    pub async fn create_alert(
-        &self,
-        name: &str,
-        ip: Value,
-        expires: i64,
-    ) -> Result<Alert> {
+    pub async fn create_alert(&self, name: &str, ips: &[String], expires: i64) -> Result<Alert> {
         let body = serde_json::json!({
             "name": name,
-            "filters": { "ip": ip },
+            "filters": { "ip": ips },
             "expires": expires,
         });
         let val = self.post_json("/shodan/alert", &[], &body).await?;
+        serde_json::from_value(val).map_err(ShodanError::Json)
+    }
+
+    pub async fn update_alert(&self, aid: &str, ips: &[String]) -> Result<Alert> {
+        let body = serde_json::json!({
+            "filters": { "ip": ips },
+        });
+        let val = self
+            .post_json(&format!("/shodan/alert/{}", aid), &[], &body)
+            .await?;
         serde_json::from_value(val).map_err(ShodanError::Json)
     }
 
@@ -277,19 +264,13 @@ impl ShodanClient {
     }
 
     pub async fn enable_alert_trigger(&self, aid: &str, trigger: &str) -> Result<Value> {
-        self.put(
-            &format!("/shodan/alert/{}/trigger/{}", aid, trigger),
-            &[],
-        )
-        .await
+        self.put(&format!("/shodan/alert/{}/trigger/{}", aid, trigger), &[])
+            .await
     }
 
     pub async fn disable_alert_trigger(&self, aid: &str, trigger: &str) -> Result<Value> {
-        self.delete(
-            &format!("/shodan/alert/{}/trigger/{}", aid, trigger),
-            &[],
-        )
-        .await
+        self.delete(&format!("/shodan/alert/{}/trigger/{}", aid, trigger), &[])
+            .await
     }
 
     pub async fn list_datasets(&self) -> Result<Vec<Dataset>> {
@@ -298,9 +279,7 @@ impl ShodanClient {
     }
 
     pub async fn list_dataset_files(&self, dataset: &str) -> Result<Vec<DataFile>> {
-        let val = self
-            .get(&format!("/shodan/data/{}", dataset), &[])
-            .await?;
+        let val = self.get(&format!("/shodan/data/{}", dataset), &[]).await?;
         serde_json::from_value(val).map_err(ShodanError::Json)
     }
 
@@ -436,6 +415,61 @@ mod tests {
         let client = make_client(&server.url());
         let host = client.host_info("1.2.3.4", false, true).await.unwrap();
         assert_eq!(host.tags, Some(vec!["honeypot".to_string()]));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_create_alert_with_multiple_networks() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/shodan/alert")
+            .match_query(mockito::Matcher::UrlEncoded("key".into(), "testkey".into()))
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "name": "production",
+                "filters": { "ip": ["1.2.3.4", "10.0.0.0/24"] },
+                "expires": 0
+            })))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"id":"alert-id","name":"production","filters":{"ip":["1.2.3.4","10.0.0.0/24"]},"expires":0}"#,
+            )
+            .create_async()
+            .await;
+
+        let client = make_client(&server.url());
+        let networks = vec!["1.2.3.4".to_string(), "10.0.0.0/24".to_string()];
+        let alert = client
+            .create_alert("production", &networks, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(alert.id, "alert-id");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_update_alert_replaces_networks() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/shodan/alert/alert-id")
+            .match_query(mockito::Matcher::UrlEncoded("key".into(), "testkey".into()))
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "filters": { "ip": ["203.0.113.0/24"] }
+            })))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"id":"alert-id","name":"production","filters":{"ip":["203.0.113.0/24"]},"expires":0}"#,
+            )
+            .create_async()
+            .await;
+
+        let client = make_client(&server.url());
+        let networks = vec!["203.0.113.0/24".to_string()];
+        let alert = client.update_alert("alert-id", &networks).await.unwrap();
+
+        assert_eq!(alert.filters.ip, serde_json::json!(["203.0.113.0/24"]));
         mock.assert_async().await;
     }
 }
